@@ -1,16 +1,16 @@
 CC = ocamlc
-DEPS = 
+DEPS = unix
 
 run: ping
-	./$<
+	sudo strace -e trace=network ./$<
 
 %: %.ml
-	ocamlfind $(CC) -o $@ $^
+	ocamlfind $(CC) -linkpkg -package $(DEPS) -o $@ $^
 
 clean:
-	rm -rf gen *.cmi *.cmo *_{j,t}.{ml,mli}
+	rm -rf ping *.cmi *.cmo
 
 deps:
 	opam install ocamlfind $(DEPS)
 
-.PHONY: run all clean deps
+.PHONY: run clean deps
