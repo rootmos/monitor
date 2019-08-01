@@ -2,3 +2,5 @@ ping
 
 *.cmi
 *.cmo
+*.cmx
+*.o

@@ -1,9 +1,10 @@
-open Unix
+open Lwt
+open Lwt_unix
 open Printf
 
 let string_of_sockaddr = function
-| ADDR_INET (a, 0) -> sprintf "%s" (string_of_inet_addr a)
-| ADDR_INET (a, p) -> sprintf "%s:%d" (string_of_inet_addr a) p
+| ADDR_INET (a, 0) -> sprintf "%s" (Unix.string_of_inet_addr a)
+| ADDR_INET (a, p) -> sprintf "%s:%d" (Unix.string_of_inet_addr a) p
 | _ -> failwith "unexpected address format"
 
 let target = "ip.rootmos.io"
@@ -15,8 +16,7 @@ let next_seq () = let s = !seq in incr seq; s
 
 let max_len = 576
 
-let t =
-  let he = gethostbyname target in
+let t = gethostbyname target >|= fun he ->
   match Array.length he.h_addr_list with
   | 0 -> failwith (sprintf "no such host %s" target)
   | _ -> ADDR_INET (Array.get he.h_addr_list 0, 0)
@@ -50,22 +50,22 @@ let ping_req payload =
 
 let s = socket PF_INET SOCK_RAW 1
 
-let send () =
+let send t =
   let req = ping_req (Bytes.of_string "hello") in
-  let sent = sendto s req 0 (Bytes.length req) [] t in
-  if sent <> (Bytes.length req) then failwith "unable to send whole ping request"
+  sendto s req 0 (Bytes.length req) [] t >|= fun sent ->
+    if sent <> (Bytes.length req) then failwith "unable to send whole ping request"
 
 let recv () =
-  let open Bytes in
-  let msg = create max_len in
   let rec go () =
-    let (l, a) = recvfrom s msg 0 (length msg) [] in
-    let off = 4 * (get_uint8 msg 0 land 0x0f) in
-    let id = get_uint16_ne msg (off + 4) in
-    if id <> identifier then () else
-      let seq = get_uint16_ne msg (off + 6) in
-      printf "received %d bytes (seq %d) from %s\n"
-        (l - off) seq (string_of_sockaddr a)
+    let open Bytes in
+    let msg = create max_len in
+    recvfrom s msg 0 (length msg) [] >|= fun (l, a) ->
+      let off = 4 * (get_uint8 msg 0 land 0x0f) in
+      let id = get_uint16_ne msg (off + 4) in
+      if id <> identifier then () else
+        let seq = get_uint16_ne msg (off + 6) in
+        printf "received %d bytes (seq %d) from %s\n"
+          (l - off) seq (string_of_sockaddr a)
   in go ()
 
-let () = for i = 0 to 10 do send (); recv () done
+let () = Lwt_main.run (t >>= send >>= fun () -> recv ())
