@@ -6,8 +6,66 @@ let string_of_sockaddr = function
 | ADDR_INET (a, p) -> sprintf "%s:%d" (string_of_inet_addr a) p
 | _ -> failwith "unexpected address format"
 
-let s = socket PF_INET SOCK_RAW 1
-let buf = Bytes.create 576
-let (l, a) = recvfrom s buf 0 (Bytes.length buf) []
+let target = "ip.rootmos.io"
 
-let () = printf "received %d bytes from %s\n" l (string_of_sockaddr a)
+let () = Random.self_init ()
+let identifier = Random.bits () land 0xffff
+let seq = ref 0
+let next_seq () = let s = !seq in incr seq; s
+
+let max_len = 576
+
+let t =
+  let he = gethostbyname target in
+  match Array.length he.h_addr_list with
+  | 0 -> failwith (sprintf "no such host %s" target)
+  | _ -> ADDR_INET (Array.get he.h_addr_list 0, 0)
+
+let checksum_1071 bs =
+  let sum = ref 0 and count = ref @@ Bytes.length bs and off = ref 0 in
+  while !count > 1 do
+    sum := !sum + Bytes.get_int16_le bs !off;
+    count := !count - 2;
+    off := !off + 2
+  done;
+  if !count > 0 then sum := !sum + Bytes.get_uint8 bs !off;
+  while !sum lsr 16 > 0 do
+    sum := !sum land 0xffff + !sum lsr 16
+  done;
+  !sum
+
+let ping_req payload =
+  let open Bytes in
+  let l = 8 + length payload in
+  if l > max_len then invalid_arg "payload too big";
+  let msg = create l in
+  set_uint8 msg 0 8; (* type *)
+  set_uint8 msg 1 0; (* code *)
+  set_uint16_ne msg 2 0; (* checksum *)
+  set_uint16_ne msg 4 identifier; (* identifier *)
+  set_uint16_ne msg 6 @@ next_seq (); (* sequence *)
+  blit payload 0 msg 8 @@ length payload;
+  set_uint16_ne msg 2 (checksum_1071 msg |> lnot);
+  msg
+
+let s = socket PF_INET SOCK_RAW 1
+
+let send () =
+  let req = ping_req (Bytes.of_string "hello") in
+  let sent = sendto s req 0 (Bytes.length req) [] t in
+  if sent <> (Bytes.length req) then failwith "unable to send whole ping request"
+
+let recv () =
+  let open Bytes in
+  let msg = create max_len in
+  let rec go () =
+    let (l, a) = recvfrom s msg 0 (length msg) [] in
+    let off = 4 * (get_uint8 msg 0 land 0x0f) in
+    let id = get_uint16_ne msg (off + 4) in
+    if id <> identifier then () else
+      let seq = get_uint16_ne msg (off + 6) in
+      printf "received %d bytes (seq %d) from %s\n"
+        (l - off) seq (string_of_sockaddr a)
+  in go ()
+
+let () = for i = 0 to 10 do send (); recv () done
