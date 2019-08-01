@@ -59,13 +59,14 @@ let recv () =
   let rec go () =
     let open Bytes in
     let msg = create max_len in
-    recvfrom s msg 0 (length msg) [] >|= fun (l, a) ->
+    recvfrom s msg 0 (length msg) [] >>= fun (l, a) ->
       let off = 4 * (get_uint8 msg 0 land 0x0f) in
       let id = get_uint16_ne msg (off + 4) in
-      if id <> identifier then () else
+      if id <> identifier then go () else
         let seq = get_uint16_ne msg (off + 6) in
         printf "received %d bytes (seq %d) from %s\n"
-          (l - off) seq (string_of_sockaddr a)
-  in go ()
+          (l - off) seq (string_of_sockaddr a);
+        return ()
+  in with_timeout 1.0 go
 
-let () = Lwt_main.run (t >>= send >>= fun () -> recv ())
+let () = Lwt_main.run (t >>= send <&> recv ())
