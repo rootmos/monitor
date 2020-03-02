@@ -52,9 +52,14 @@ let send s t seq =
   let%lwt sent = sendto s req 0 (Bytes.length req) [] t in
   if sent <> (Bytes.length req)
   then fail_with "unable to send whole ping request"
-  else Lwt_io.printf "sent ping %d\n" seq
+  else return ()
 
-type rsp = { seq: int; len: int; from: sockaddr; }
+type rsp = {
+  seq: int;
+  len: int;
+  from: sockaddr;
+  time: float;
+}
 
 let rec recv s () =
   let open Bytes in
@@ -64,23 +69,74 @@ let rec recv s () =
   let id = get_uint16_ne msg (off + 4) in
   if id <> identifier then recv s () else
     let seq = get_uint16_ne msg (off + 6) in
-    return (Some { seq; len = l - off; from = a })
+    let time = Unix.gettimeofday () in
+    return (Some { seq; len = l - off; from = a; time })
 
-module Monitor : Monitor.S = struct
-  type e = rsp
-  type s = { s: file_descr; t: sockaddr }
+type status = {
+  seq: int;
+  sentat: float;
+  respat: float option;
+}
 
-  let start () =
-    let%lwt t = resolve target in
-    let s = socket PF_INET SOCK_RAW 1 in
-    let es = Lwt_stream.from (recv s) in
-    return (es, { s; t })
+type state = {
+  s: file_descr;
+  t: sockaddr;
+  ps: status option Array.t;
+  i: int;
+}
 
-  let event st msg =
-    let%lwt () = Lwt_io.printf "ping received %d\n" msg.seq in
-    return st
+type stats = {
+  sent: int;
+  responses: int;
+  min: float;
+  max: float;
+  avg: float;
+}
 
-  let tick st (t: Monitor.tick) =
-    let%lwt () = send st.s st.t t.seq in
-    return st
-end
+let start () =
+  let%lwt t = resolve target in
+  let s = socket PF_INET SOCK_RAW 1 in
+  let es = Lwt_stream.from (recv s) in
+  let ps = Array.make 1000 None in
+  return (es, { s; t; ps; i = 0 })
+
+let event st (msg: rsp) =
+  let f i = function
+      Some p when p.seq = msg.seq ->
+        Array.set st.ps i (Some { p with respat = Some msg.time })
+    | _ -> () in
+  Array.iteri f st.ps;
+  return st
+
+let tick st (t: Monitor.tick) =
+  let seq = t.seq in
+  let%lwt () = send st.s st.t seq in
+  Array.set st.ps st.i (Some { seq; sentat = t.time; respat = None });
+  return { st with i = (st.i + 1) mod Array.length st.ps }
+
+let stats st =
+  let sent = ref 0 in
+  let responses = ref 0 in
+  let total = ref 0.0 in
+  let max = ref nan in
+  let min = ref nan in
+  let f = function
+    None -> ()
+  | Some p ->
+      sent := !sent + 1;
+      match p.respat with
+      Some t ->
+        responses := !responses + 1;
+        let d = t -. p.sentat in
+        total := !total +. d;
+        if d < !min || !responses = 1 then min := d;
+        if d > !max || !responses = 1 then max := d
+      | None -> () in
+  Array.iter f st.ps;
+  {
+    sent = !sent;
+    responses = !responses;
+    avg = !total /. (float_of_int !responses);
+    min = !min;
+    max = !max;
+  }

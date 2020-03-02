@@ -29,13 +29,15 @@ let deinit s =
 type state = {
   running: bool;
   seq: int;
-  ping: Ping.Monitor.s;
+  ping: Ping.state;
 }
 
 let run o st = function
   "STOP" -> return @@ { st with running = false }
 | "PING" ->
-    let%lwt () = Lwt_io.write o "PONG\n" in
+    let s = Ping.stats st.ping in
+    let%lwt () = Lwt_io.fprintf o "%d/%d %.0fms/%.0fms/%.0fms\n"
+      s.responses s.sent (1000.*.s.min) (1000.*.s.avg) (1000.*.s.max) in
     return st
 | cmd ->
     let%lwt () = Lwt_io.fprintf o "ERR unexpected command: %s\n" cmd in
@@ -49,21 +51,22 @@ let handle_req st s =
   Lwt_stream.fold_s f (Lwt_io.read_lines i) st
 
 let handle_tick st =
-  let t: Monitor.tick = { seq = st.seq } in
-  let%lwt _ = Ping.Monitor.tick st.ping t in
-  return { st with seq = st.seq + 1 }
+  let time = Unix.gettimeofday () in
+  let t: Monitor.tick = { seq = st.seq; time } in
+  let%lwt ping = Ping.tick st.ping t in
+  return { st with seq = st.seq + 1; ping }
 
 let handle_event st = function
   `Tick -> handle_tick st
 | `Req s -> handle_req st s
 | `Ping e ->
-    let%lwt pst = Ping.Monitor.event st.ping e in
+    let%lwt pst = Ping.event st.ping e in
     return { st with ping = pst }
 
 let _ = Lwt_main.run @@
   let%lwt s = init in
 
-  let%lwt pe, ps = Ping.Monitor.start () in
+  let%lwt pe, ps = Ping.start () in
 
   let st = {
     running = true;
@@ -72,7 +75,7 @@ let _ = Lwt_main.run @@
   } in
 
   let ticks, tick = Lwt_stream.create () in
-  let _ = Lwt_engine.on_timer 1.0 true (fun _ -> tick (Some `Tick)) in
+  let _ = Lwt_engine.on_timer 0.1 true (fun _ -> tick (Some `Tick)) in
 
   let clients = Lwt_stream.from @@ fun () ->
     let%lwt s, _ = accept s in return (Some (`Req s)) in
