@@ -1,8 +1,13 @@
-run: ping
-	sudo strace -e trace=network ./$<
+SUDO ?=
+
+run: server
+	./$<
+
+test-loop:
+	while sleep 1; do ./test.sh; done
 
 %: %.ml
-	ocamlfind opt -linkpkg -package lwt.unix -package lwt_ppx -o $@ $^
+	ocamlfind opt -thread -linkpkg -package lwt.unix -package lwt_ppx -o $@ $^
 
 clean:
 	rm -rf ping *.cmi *.cmo
