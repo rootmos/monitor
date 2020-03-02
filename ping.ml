@@ -11,15 +11,13 @@ let target = "ip.rootmos.io"
 
 let () = Random.self_init ()
 let identifier = Random.bits () land 0xffff
-let seq = ref 0
-let next_seq () = let s = !seq in incr seq; s
 
 let max_len = 576
 
-let t =
-  let%lwt he = gethostbyname target in
+let resolve t =
+  let%lwt he = gethostbyname t in
   match Array.length he.h_addr_list with
-  | 0 -> fail_with (sprintf "no such host %s" target)
+  | 0 -> fail_with (sprintf "no such host %s" t)
   | _ -> return @@ ADDR_INET (Array.get he.h_addr_list 0, 0)
 
 let checksum_1071 bs =
@@ -35,7 +33,7 @@ let checksum_1071 bs =
   done;
   !sum
 
-let ping_req payload =
+let ping_req seq payload =
   let open Bytes in
   let l = 8 + length payload in
   if l > max_len then fail_invalid_arg "payload too big"
@@ -44,32 +42,45 @@ let ping_req payload =
   set_uint8 msg 1 0; (* code *)
   set_uint16_ne msg 2 0; (* checksum *)
   set_uint16_ne msg 4 identifier; (* identifier *)
-  set_uint16_ne msg 6 @@ next_seq (); (* sequence *)
+  set_uint16_ne msg 6 @@ seq; (* sequence *)
   blit payload 0 msg 8 @@ length payload;
   set_uint16_ne msg 2 (checksum_1071 msg |> lnot);
   return msg
 
-let s = socket PF_INET SOCK_RAW 1
-
-let send t =
-  let%lwt req = ping_req (Bytes.of_string "hello") in
+let send s t seq =
+  let%lwt req = ping_req seq (Bytes.of_string "hello") in
   let%lwt sent = sendto s req 0 (Bytes.length req) [] t in
   if sent <> (Bytes.length req)
   then fail_with "unable to send whole ping request"
-  else return ()
+  else Lwt_io.printf "sent ping %d\n" seq
 
-let recv () =
-  let rec go () =
-    let open Bytes in
-    let msg = create max_len in
-    let%lwt (l, a) = recvfrom s msg 0 (length msg) [] in
-    let off = 4 * (get_uint8 msg 0 land 0x0f) in
-    let id = get_uint16_ne msg (off + 4) in
-    if id <> identifier then go () else
-      let seq = get_uint16_ne msg (off + 6) in
-      printf "received %d bytes (seq %d) from %s\n"
-        (l - off) seq (string_of_sockaddr a);
-      return ()
-  in with_timeout 1.0 go
+type rsp = { seq: int; len: int; from: sockaddr; }
 
-let () = Lwt_main.run (t >>= send <&> recv ())
+let rec recv s () =
+  let open Bytes in
+  let msg = create max_len in
+  let%lwt (l, a) = recvfrom s msg 0 (length msg) [] in
+  let off = 4 * (get_uint8 msg 0 land 0x0f) in
+  let id = get_uint16_ne msg (off + 4) in
+  if id <> identifier then recv s () else
+    let seq = get_uint16_ne msg (off + 6) in
+    return (Some { seq; len = l - off; from = a })
+
+module Monitor : Monitor.S = struct
+  type e = rsp
+  type s = { s: file_descr; t: sockaddr }
+
+  let start () =
+    let%lwt t = resolve target in
+    let s = socket PF_INET SOCK_RAW 1 in
+    let es = Lwt_stream.from (recv s) in
+    return (es, { s; t })
+
+  let event st msg =
+    let%lwt () = Lwt_io.printf "ping received %d\n" msg.seq in
+    return st
+
+  let tick st (t: Monitor.tick) =
+    let%lwt () = send st.s st.t t.seq in
+    return st
+end
