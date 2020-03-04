@@ -28,7 +28,7 @@ let start () =
   return (es, s)
 
 let fetch reqat st =
-  let uri = Uri.of_string "http://ip.rootmos.io/json" in
+  let uri = Uri.of_string "https://ip.rootmos.io/json" in
   let%lwt (rsp, body) = Client.get uri in
   let rspat = Unix.gettimeofday () in
   let%lwt body = Cohttp_lwt.Body.to_string body in
@@ -45,11 +45,17 @@ let event st (i: info) =
 
 let tick st (t: Monitor.tick) =
   if not (Monitor.divide_tick_seconds ~salt 2 t) then return st else begin
-    let () = match Array.get st.reqs st.i with
-      Some r -> Lwt.cancel r
-    | None -> () in
+    let%lwt () = match Array.get st.reqs st.i with
+      Some r ->
+        let%lwt () = Logs_lwt.warn (fun m ->
+          m "cancelling location request: %d" st.i) in
+        return (Lwt.cancel r)
+    | None -> return () in
     let f = fetch t.time st in
+    let () = Lwt.on_failure f (fun ex -> Logs.err (fun m ->
+        m "location error: %s" (Printexc.to_string ex))) in
     Array.set st.reqs st.i (Some f);
+    let%lwt () = Logs_lwt.debug (fun m -> m "location request sent: %d" st.i) in
     return { st with i = (st.i + 1) mod Array.length st.reqs }
   end
 

@@ -6,7 +6,7 @@ run: server
 test-loop:
 	while sleep 1; do ./test.sh; done
 
-PKGs = lwt.unix,lwt_ppx,str,cohttp-lwt-unix,atdgen
+PKGs = lwt.unix,lwt_ppx,str,cohttp-lwt-unix,atdgen,logs.fmt
 
 define atd
 $(1)_t.mli $(1)_t.ml $(1)_j.mli $(1)_j.ml
@@ -26,6 +26,6 @@ clean:
 	rm -rf server *.cmi *.cmo *.cmx
 
 deps:
-	opam install ocamlfind lwt lwt_ppx merlin cohttp-lwt-unix atdgen
+	opam install ocamlfind lwt lwt_ppx merlin tls cohttp-lwt-unix atdgen logs
 
 .PHONY: run clean deps

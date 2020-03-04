@@ -9,8 +9,10 @@ let sf, lf =
   t ^ "/monitor.sock", t ^ "/monitor.lock"
 
 let init =
+  Logs.set_level (Some Logs.Debug);
+  Logs.set_reporter (Logs_fmt.reporter ());
   let s = socket PF_UNIX SOCK_STREAM 0 in
-  let%lwt _ = Lwt_io.printf "server socket: %s\n" sf in
+  let%lwt () = Logs_lwt.info (fun m -> m "server socket: %s" sf) in
   let%lwt l = openfile lf Unix.(O_WRONLY :: O_CREAT :: []) 0o600 in
   let%lwt _ = lockf l F_TLOCK 0 in
   let%lwt _ = try%lwt unlink sf with
@@ -67,7 +69,7 @@ let handle_tick st =
   let%lwt location = Location.tick st.location t in
   return { st with seq = st.seq + 1; ping; location }
 
-let handle_event st = function
+let handle_ok_event st = function
   `Tick -> handle_tick st
 | `Req s -> handle_req st s (* TODO: close socket? *)
 | `Ping e ->
@@ -77,7 +79,14 @@ let handle_event st = function
     let%lwt lst = Location.event st.location e in
     return { st with location = lst }
 
-let _ = Lwt_main.run @@
+let handle_event st = function
+  Ok e -> handle_ok_event st e
+| Error e ->
+    let%lwt () = Logs_lwt.err (fun m ->
+      m "error event: %s" (Printexc.to_string e)) in
+    return st
+
+let _ = Lwt_main.run @@ begin
   let%lwt s = init in
 
   let%lwt pe, ps = Ping.start () in
@@ -98,12 +107,13 @@ let _ = Lwt_main.run @@
   let clients = Lwt_stream.from @@ fun () ->
     let%lwt s, _ = accept s in return (Some (`Req s)) in
 
-  let events = Lwt_stream.choose [
+  let events = [
     ticks; clients;
     pe |> Lwt_stream.map (fun e -> `Ping e);
     le |> Lwt_stream.map (fun e -> `Location e)
-  ] in
+  ] |> List.map Lwt_stream.wrap_exn |> Lwt_stream.choose in
 
   let rec loop st = if not st.running then return () else
     Lwt_stream.next events >>= handle_event st >>= loop in
   finalize (fun () -> loop st) (fun () -> deinit s)
+end

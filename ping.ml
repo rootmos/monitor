@@ -51,7 +51,7 @@ let send s t seq =
   let%lwt sent = sendto s req 0 (Bytes.length req) [] t in
   if sent <> (Bytes.length req)
   then fail_with "unable to send whole ping request"
-  else return ()
+  else Logs_lwt.debug (fun m -> m "ping request: %d" seq)
 
 type rsp = {
   seq: int;
@@ -92,12 +92,14 @@ type stats = {
 }
 
 let start () =
+  let%lwt () = Logs_lwt.debug (fun m -> m "ping identifier: %d\n" identifier) in
   let s = socket PF_INET SOCK_RAW 1 in
   let es = Lwt_stream.from (recv s) in
   let ps = Array.make 1000 None in
   return (es, { s; ps; i = 0 })
 
 let event st (msg: rsp) =
+  let%lwt () = Logs_lwt.debug (fun m -> m "ping response: %d" msg.seq) in
   let f i = function
       Some p when p.seq = msg.seq ->
         Array.set st.ps i (Some { p with respat = Some msg.time })
