@@ -45,11 +45,25 @@ let run o st = function
     return st
 | "IP" -> begin match Location.info st.location with
       Some i ->
-        let%lwt () = Lwt_io.fprintf o "%s\n" i.ip in
-        return st
-    | None ->
-        let%lwt () = Lwt_io.fprintf o "\n" in
-        return st
+        let%lwt () = Lwt_io.fprintf o "%s\n" i.ip in return st
+    | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
+| "COUNTRY" -> begin match Location.info st.location with
+      Some { country = Some c }  ->
+        let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
+    | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
+| "CITY" -> begin match Location.info st.location with
+      Some { city = Some c }  ->
+        let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
+    | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
+| "LOCATION" -> begin match Location.info st.location with
+      Some { city = Some c }  ->
+        let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
+    | Some { country = Some c }  ->
+        let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
+    | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
 | cmd ->
     let%lwt () = Lwt_io.fprintf o "ERR unexpected command: %s\n" cmd in

@@ -10,6 +10,7 @@ type info = {
   rspat: float;
   ip: string;
   country: string option;
+  city: string option;
 }
 
 type state = {
@@ -33,7 +34,10 @@ let fetch reqat st =
   let rspat = Unix.gettimeofday () in
   let%lwt body = Cohttp_lwt.Body.to_string body in
   let rsp = Ip_resp_j.ip_resp_of_string body in
-  let i = { reqat; rspat; ip = rsp.ip; country = rsp.country } in
+  let i = { reqat; rspat; ip = rsp.ip;
+    country = rsp.country;
+    city = rsp.city;
+  } in
   st.new_info i;
   return i
 

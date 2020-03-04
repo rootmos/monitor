@@ -10,6 +10,7 @@ for i in $(seq 1 5); do
     socat - unix:"$SOCKET" <<EOF
 PING
 IP
+LOCATION
 EOF
 done
 
