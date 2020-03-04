@@ -1,0 +1,5 @@
+type ip_resp = {
+  ip: string;
+  ?country: string option;
+  ?city: string option;
+}

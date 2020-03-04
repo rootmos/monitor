@@ -6,14 +6,26 @@ run: server
 test-loop:
 	while sleep 1; do ./test.sh; done
 
-OCAMLOPT = ocamlfind ocamlopt -thread -package lwt.unix,lwt_ppx,str
-server: server.ml monitor.mli ping.ml
-	$(OCAMLOPT) -linkpkg -o $@ monitor.mli ping.ml server.ml
+PKGs = lwt.unix,lwt_ppx,str,cohttp-lwt-unix,atdgen
+
+define atd
+$(1)_t.mli $(1)_t.ml $(1)_j.mli $(1)_j.ml
+endef
+
+%_t.mli %_t.ml %_j.mli %_j.ml: %.atd
+	atdgen -t $<
+	atdgen -j $<
+
+OCAMLOPT = ocamlfind ocamlopt -thread -package $(PKGs)
+server: \
+	$(call atd, ip_resp) \
+	utils.ml monitor.ml ping.ml location.ml server.ml
+	$(OCAMLOPT) -linkpkg -o $@ $^
 
 clean:
 	rm -rf server *.cmi *.cmo *.cmx
 
 deps:
-	opam install ocamlfind lwt lwt_ppx merlin
+	opam install ocamlfind lwt lwt_ppx merlin cohttp-lwt-unix atdgen
 
 .PHONY: run clean deps

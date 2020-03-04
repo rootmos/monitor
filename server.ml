@@ -29,7 +29,9 @@ let deinit s =
 type state = {
   running: bool;
   seq: int;
+  tick_rate: int;
   ping: Ping.state;
+  location: Location.state;
 }
 
 let run o st = function
@@ -39,6 +41,14 @@ let run o st = function
     let%lwt () = Lwt_io.fprintf o "%d/%d %.0fms/%.0fms/%.0fms\n"
       s.responses s.sent (1000.*.s.min) (1000.*.s.avg) (1000.*.s.max) in
     return st
+| "IP" -> begin match Location.info st.location with
+      Some i ->
+        let%lwt () = Lwt_io.fprintf o "%s\n" i.ip in
+        return st
+    | None ->
+        let%lwt () = Lwt_io.fprintf o "\n" in
+        return st
+    end
 | cmd ->
     let%lwt () = Lwt_io.fprintf o "ERR unexpected command: %s\n" cmd in
     let%lwt () = Lwt_io.printf "unexpected command: %s\n" cmd in
@@ -52,37 +62,46 @@ let handle_req st s =
 
 let handle_tick st =
   let time = Unix.gettimeofday () in
-  let t: Monitor.tick = { seq = st.seq; time } in
+  let t: Monitor.tick = { seq = st.seq; tick_rate = st.tick_rate; time } in
   let%lwt ping = Ping.tick st.ping t in
-  return { st with seq = st.seq + 1; ping }
+  let%lwt location = Location.tick st.location t in
+  return { st with seq = st.seq + 1; ping; location }
 
 let handle_event st = function
   `Tick -> handle_tick st
-| `Req s -> handle_req st s
+| `Req s -> handle_req st s (* TODO: close socket? *)
 | `Ping e ->
     let%lwt pst = Ping.event st.ping e in
     return { st with ping = pst }
+| `Location e ->
+    let%lwt lst = Location.event st.location e in
+    return { st with location = lst }
 
 let _ = Lwt_main.run @@
   let%lwt s = init in
 
   let%lwt pe, ps = Ping.start () in
+  let%lwt le, ls = Location.start () in
 
   let st = {
     running = true;
     seq = 0;
+    tick_rate = 100;
     ping = ps;
+    location = ls;
   } in
+  let d = 1.0 /. (Float.of_int st.tick_rate) in
 
   let ticks, tick = Lwt_stream.create () in
-  let _ = Lwt_engine.on_timer 0.1 true (fun _ -> tick (Some `Tick)) in
+  let _ = Lwt_engine.on_timer d true (fun _ -> tick (Some `Tick)) in
 
   let clients = Lwt_stream.from @@ fun () ->
     let%lwt s, _ = accept s in return (Some (`Req s)) in
 
   let events = Lwt_stream.choose [
     ticks; clients;
-    pe |> Lwt_stream.map (fun e -> `Ping e)
+    pe |> Lwt_stream.map (fun e -> `Ping e);
+    le |> Lwt_stream.map (fun e -> `Location e)
   ] in
 
   let rec loop st = if not st.running then return () else

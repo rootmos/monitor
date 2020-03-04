@@ -5,3 +5,5 @@ server
 *.cmo
 *.cmx
 *.o
+*_t.ml*
+*_j.ml*

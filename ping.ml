@@ -1,23 +1,21 @@
 open Lwt
 open Lwt_unix
-open Printf
 
 let string_of_sockaddr = function
-| ADDR_INET (a, 0) -> sprintf "%s" (Unix.string_of_inet_addr a)
-| ADDR_INET (a, p) -> sprintf "%s:%d" (Unix.string_of_inet_addr a) p
+| ADDR_INET (a, 0) -> Printf.sprintf "%s" (Unix.string_of_inet_addr a)
+| ADDR_INET (a, p) -> Printf.sprintf "%s:%d" (Unix.string_of_inet_addr a) p
 | ADDR_UNIX s -> s
 
 let target = "ip.rootmos.io"
-
-let () = Random.self_init ()
-let identifier = Random.bits () land 0xffff
+let salt = Utils.fresh_salt ()
 
 let max_len = 576
+let identifier = Utils.fresh_identifier ()
 
 let resolve t =
   let%lwt he = gethostbyname t in
   match Array.length he.h_addr_list with
-  | 0 -> fail_with (sprintf "no such host %s" t)
+  | 0 -> fail_with (Printf.sprintf "no such host %s" t)
   | _ -> return @@ ADDR_INET (Array.get he.h_addr_list 0, 0)
 
 let checksum_1071 bs =
@@ -48,6 +46,7 @@ let ping_req seq payload =
   return msg
 
 let send s t seq =
+  let%lwt t = resolve t in
   let%lwt req = ping_req seq (Bytes.of_string "hello") in
   let%lwt sent = sendto s req 0 (Bytes.length req) [] t in
   if sent <> (Bytes.length req)
@@ -80,7 +79,6 @@ type status = {
 
 type state = {
   s: file_descr;
-  t: sockaddr;
   ps: status option Array.t;
   i: int;
 }
@@ -94,11 +92,10 @@ type stats = {
 }
 
 let start () =
-  let%lwt t = resolve target in
   let s = socket PF_INET SOCK_RAW 1 in
   let es = Lwt_stream.from (recv s) in
   let ps = Array.make 1000 None in
-  return (es, { s; t; ps; i = 0 })
+  return (es, { s; ps; i = 0 })
 
 let event st (msg: rsp) =
   let f i = function
@@ -109,8 +106,9 @@ let event st (msg: rsp) =
   return st
 
 let tick st (t: Monitor.tick) =
+  if not (Monitor.divide_tick_hz ~salt 2 t) then return st else
   let seq = t.seq in
-  let%lwt () = send st.s st.t seq in
+  let%lwt () = send st.s target seq in
   Array.set st.ps st.i (Some { seq; sentat = t.time; respat = None });
   return { st with i = (st.i + 1) mod Array.length st.ps }
 
