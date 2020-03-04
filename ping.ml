@@ -40,7 +40,7 @@ let ping_req seq payload =
   set_uint8 msg 1 0; (* code *)
   set_uint16_ne msg 2 0; (* checksum *)
   set_uint16_ne msg 4 identifier; (* identifier *)
-  set_uint16_ne msg 6 @@ seq; (* sequence *)
+  set_uint16_ne msg 6 seq; (* sequence *)
   blit payload 0 msg 8 @@ length payload;
   set_uint16_ne msg 2 (checksum_1071 msg |> lnot);
   return msg
@@ -95,7 +95,7 @@ let start () =
   let%lwt () = Logs_lwt.debug (fun m -> m "ping identifier: %d\n" identifier) in
   let s = socket PF_INET SOCK_RAW 1 in
   let es = Lwt_stream.from (recv s) in
-  let ps = Array.make 1000 None in
+  let ps = Array.make 100 None in
   return (es, { s; ps; i = 0 })
 
 let event st (msg: rsp) =
@@ -109,7 +109,7 @@ let event st (msg: rsp) =
 
 let tick st (t: Monitor.tick) =
   if not (Monitor.divide_tick_hz ~salt 2 t) then return st else
-  let seq = t.seq in
+  let seq = t.seq land 0x7fff in
   let%lwt () = send st.s target seq in
   Array.set st.ps st.i (Some { seq; sentat = t.time; respat = None });
   return { st with i = (st.i + 1) mod Array.length st.ps }

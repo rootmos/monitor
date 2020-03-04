@@ -1,6 +1,6 @@
 let () = Random.self_init ()
 
-let fresh_identifier () = Random.bits () land 0xffff
+let fresh_identifier () = Random.bits () land 0x7fff
 let fresh_salt () = Random.bits ()
 
 let socket_path () =
