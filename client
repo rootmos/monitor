@@ -1,0 +1,22 @@
+#!/bin/bash
+
+set -o nounset -o pipefail -o errexit
+
+SOCKET=${MONITOR_SOCKET-/var/run/user/$(id -u)/monitor.sock}
+
+while getopts "lip:s-" OPT; do
+    case $OPT in
+        l) CMD=LOCATION ;;
+        i) CMD=IP ;;
+        p) case $OPTARG in
+            avg) CMD="PING AVG_MS" ;;
+            loss) CMD="PING LOSS_PERCENT" ;;
+        esac ;;
+        s) CMD=STOP ;;
+        -) break ;;
+        ?) exit 2 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+exec socat - unix:"$SOCKET" <<< "$CMD"

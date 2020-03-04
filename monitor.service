@@ -1,0 +1,10 @@
+[Unit]
+Description=System monitor daemon
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStart=/usr/local/bin/monitor-server
+
+[Install]
+WantedBy=default.target

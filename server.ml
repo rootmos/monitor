@@ -1,12 +1,8 @@
 open Lwt
 open Lwt_unix
 
-let sf, lf =
-  let gid = Unix.getuid () in
-  let t = Sys.getenv_opt "MONITOR_RUN_DIR"
-    |> Option.value ~default:"/var/run/user/%u"
-    |> Str.global_replace (Str.regexp "%u") (Int.to_string gid) in
-  t ^ "/monitor.sock", t ^ "/monitor.lock"
+let sf = Utils.socket_path ()
+let lf = sf ^ ".lock"
 
 let init =
   Logs.set_level (Some Logs.Debug);
@@ -37,28 +33,43 @@ type state = {
 }
 
 let run o st = function
-  "STOP" -> return @@ { st with running = false }
-| "PING" ->
+  [] -> return st
+| "STOP" :: [] -> return @@ { st with running = false }
+| "PING" :: [] ->
     let s = Ping.stats st.ping in
     let%lwt () = Lwt_io.fprintf o "%d/%d %.0fms/%.0fms/%.0fms\n"
       s.responses s.sent (1000.*.s.min) (1000.*.s.avg) (1000.*.s.max) in
     return st
-| "IP" -> begin match Location.info st.location with
+| "PING" :: "AVG_MS" :: [] ->
+    let s = Ping.stats st.ping in
+    let%lwt () = Lwt_io.fprintf o "%.0f\n" (Float.round (1000.*.s.avg)) in
+    return st
+| "PING" :: "SUCCESS_PERCENT" :: [] ->
+    let s = Ping.stats st.ping in
+    let sr = (Float.of_int s.responses) /. (Float.of_int s.sent) in
+    let%lwt () = Lwt_io.fprintf o "%.0f\n" (Float.round (100.*.sr)) in
+    return st
+| "PING" :: "LOSS_PERCENT" :: [] ->
+    let s = Ping.stats st.ping in
+    let sr = (Float.of_int (s.sent - s.responses)) /. (Float.of_int s.sent) in
+    let%lwt () = Lwt_io.fprintf o "%.0f\n" (Float.round (100.*.sr)) in
+    return st
+| "IP" :: [] -> begin match Location.info st.location with
       Some i ->
         let%lwt () = Lwt_io.fprintf o "%s\n" i.ip in return st
     | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
-| "COUNTRY" -> begin match Location.info st.location with
+| "COUNTRY" :: [] -> begin match Location.info st.location with
       Some { country = Some c }  ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
-| "CITY" -> begin match Location.info st.location with
+| "CITY" :: [] -> begin match Location.info st.location with
       Some { city = Some c }  ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
-| "LOCATION" -> begin match Location.info st.location with
+| "LOCATION" :: [] -> begin match Location.info st.location with
       Some { city = Some c }  ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | Some { country = Some c }  ->
@@ -66,14 +77,16 @@ let run o st = function
     | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
 | cmd ->
-    let%lwt () = Lwt_io.fprintf o "ERR unexpected command: %s\n" cmd in
-    let%lwt () = Lwt_io.printf "unexpected command: %s\n" cmd in
+    let l = String.concat " " cmd in
+    let%lwt () = Lwt_io.fprintf o "ERR unexpected command: %s\n" l in
+    let%lwt () = Logs_lwt.err (fun m -> m "unexpected command: %s" l) in
     return st
 
 let handle_req st s =
   let i = Lwt_io.of_fd ~mode:Lwt_io.input s in
   let o = Lwt_io.of_fd ~mode:Lwt_io.output s in
-  let f l st = if st.running then run o st l else return st in
+  let f l st = let ws = Str.split (Str.regexp "[ \t]+") l in
+    if st.running then run o st ws else return st in
   Lwt_stream.fold_s f (Lwt_io.read_lines i) st
 
 let handle_tick st =

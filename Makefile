@@ -1,3 +1,6 @@
+PROGRAM_PREFIX = monitor-
+PREFIX ?= /usr/local
+
 SUDO ?=
 
 run: server
@@ -5,6 +8,10 @@ run: server
 
 test-loop:
 	while sleep 1; do ./test.sh; done
+
+install: server client
+	$(SUDO) install --owner=0 --mode=4755 server $(PREFIX)/bin/$(PROGRAM_PREFIX)server
+	$(SUDO) install --owner=0 --mode=0755 client $(PREFIX)/bin/$(PROGRAM_PREFIX)client
 
 PKGs = lwt.unix,lwt_ppx,str,cohttp-lwt-unix,atdgen,logs.fmt
 
