@@ -87,7 +87,8 @@ let handle_req st s =
   let o = Lwt_io.of_fd ~mode:Lwt_io.output s in
   let f l st = let ws = Str.split (Str.regexp "[ \t]+") l in
     if st.running then run o st ws else return st in
-  Lwt_stream.fold_s f (Lwt_io.read_lines i) st
+  finalize (fun () -> Lwt_stream.fold_s f (Lwt_io.read_lines i) st)
+    (fun () -> Lwt_io.flush o)
 
 let handle_tick st =
   let time = Unix.gettimeofday () in
@@ -98,7 +99,8 @@ let handle_tick st =
 
 let handle_ok_event st = function
   `Tick -> handle_tick st
-| `Req s -> handle_req st s (* TODO: close socket? *)
+| `Req s ->
+    finalize (fun () -> handle_req st s) (fun () -> close s)
 | `Ping e ->
     let%lwt pst = Ping.event st.ping e in
     return { st with ping = pst }
