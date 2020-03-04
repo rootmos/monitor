@@ -50,11 +50,11 @@ let event st (i: info) =
 let tick st (t: Monitor.tick) =
   if not (Monitor.divide_tick_seconds ~salt 2 t) then return st else begin
     let%lwt () = match Array.get st.reqs st.i with
-      Some r ->
+      Some r when Lwt.is_sleeping r ->
         let%lwt () = Logs_lwt.warn (fun m ->
           m "cancelling location request: %d" st.i) in
         return (Lwt.cancel r)
-    | None -> return () in
+    | _ -> return () in
     let f = fetch t.time st in
     let () = Lwt.on_failure f (fun ex -> Logs.err (fun m ->
         m "location error: %s" (Printexc.to_string ex))) in
