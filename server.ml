@@ -95,6 +95,13 @@ let run o st = function
         return st
     | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
+| "FS" :: "AVAILABLE_HUMAN" :: p ::[] -> begin match Fs.get st.fs p with
+      Some s ->
+        let%lwt () = Lwt_io.fprintf o "%s\n"
+          (Statfs.available_bytes s |> Utils.human_size_of_bytes) in
+        return st
+    | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
 | cmd ->
     let l = String.concat " " cmd in
     let%lwt () = Lwt_io.fprintf o "ERR unexpected command: %s\n" l in

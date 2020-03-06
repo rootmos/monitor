@@ -37,7 +37,7 @@ elif [ "$1" = "fs" ]; then
     elif [ "$2" = "free" ]; then
         CMDLINE="FS FREE_PERCENT $3"
     elif [ "$2" = "available" ]; then
-        CMDLINE="FS AVAILABLE_BYTES $3"
+        CMDLINE="FS AVAILABLE_HUMAN $3"
     else
         err "unknown fs subcommand: $2"
     fi
