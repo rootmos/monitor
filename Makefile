@@ -23,14 +23,19 @@ endef
 	atdgen -t $<
 	atdgen -j $<
 
-OCAMLOPT = ocamlfind ocamlopt -thread -package $(PKGs)
+OCAMLFIND = ocamlfind
+OCAMLOPT = $(OCAMLFIND) ocamlopt -thread -package $(PKGs)
 server: \
 	$(call atd, ip_resp) \
-	utils.ml monitor.ml ping.ml location.ml server.ml
+	statfs_impl.o statfs.ml \
+	utils.ml monitor.ml fs.ml ping.ml location.ml server.ml
 	$(OCAMLOPT) -linkpkg -o $@ $^
 
+%.o: %.c
+	$(OCAMLFIND) ocamlc -c $^
+
 clean:
-	rm -rf server *.cmi *.cmo *.cmx
+	rm -rf server *.cmi *.cmo *.cmx *.o *_t.ml* *_j.ml*
 
 deps:
 	opam install ocamlfind lwt lwt_ppx merlin tls cohttp-lwt-unix atdgen logs

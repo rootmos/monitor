@@ -30,6 +30,7 @@ type state = {
   tick_rate: int;
   ping: Ping.state;
   location: Location.state;
+  fs: Fs.state;
 }
 
 let run o st = function
@@ -60,21 +61,39 @@ let run o st = function
     | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
 | "COUNTRY" :: [] -> begin match Location.info st.location with
-      Some { country = Some c }  ->
+      Some { country = Some c } ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
 | "CITY" :: [] -> begin match Location.info st.location with
-      Some { city = Some c }  ->
+      Some { city = Some c } ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
 | "LOCATION" :: [] -> begin match Location.info st.location with
-      Some { city = Some c }  ->
+      Some { city = Some c } ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | Some { country = Some c }  ->
         let%lwt () = Lwt_io.fprintf o "%s\n" c in return st
     | _ -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
+| "FS" :: "USAGE_PERCENT" :: p ::[] -> begin match Fs.get st.fs p with
+      Some s ->
+        let%lwt () = Lwt_io.fprintf o "%.0f\n" (Statfs.usage_percent s) in
+        return st
+    | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
+| "FS" :: "FREE_PERCENT" :: p ::[] -> begin match Fs.get st.fs p with
+      Some s ->
+        let%lwt () = Lwt_io.fprintf o "%.0f\n" (Statfs.free_percent s) in
+        return st
+    | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
+    end
+| "FS" :: "AVAILABLE_BYTES" :: p ::[] -> begin match Fs.get st.fs p with
+      Some s ->
+        let%lwt () = Lwt_io.fprintf o "%Ld\n" (Statfs.available_bytes s) in
+        return st
+    | None -> let%lwt () = Lwt_io.fprintf o "\n" in return st
     end
 | cmd ->
     let l = String.concat " " cmd in
@@ -95,7 +114,8 @@ let handle_tick st =
   let t: Monitor.tick = { seq = st.seq; tick_rate = st.tick_rate; time } in
   let%lwt ping = Ping.tick st.ping t in
   let%lwt location = Location.tick st.location t in
-  return { st with seq = st.seq + 1; ping; location }
+  let%lwt fs = Fs.tick st.fs t in
+  return { st with seq = st.seq + 1; ping; location; fs }
 
 let handle_ok_event st = function
   `Tick -> handle_tick st
@@ -120,6 +140,7 @@ let _ = Lwt_main.run @@ begin
 
   let%lwt pe, ps = Ping.start () in
   let%lwt le, ls = Location.start () in
+  let%lwt fs = Fs.start () in
 
   let st = {
     running = true;
@@ -127,6 +148,7 @@ let _ = Lwt_main.run @@ begin
     tick_rate = 100;
     ping = ps;
     location = ls;
+    fs;
   } in
   let d = 1.0 /. (Float.of_int st.tick_rate) in
 

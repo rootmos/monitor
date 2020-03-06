@@ -3,20 +3,44 @@
 set -o nounset -o pipefail -o errexit
 
 SOCKET=${MONITOR_SOCKET-/var/run/user/$(id -u)/monitor.sock}
-
 while getopts "lip:s-" OPT; do
     case $OPT in
-        l) CMD=LOCATION ;;
-        i) CMD=IP ;;
-        p) case $OPTARG in
-            avg) CMD="PING AVG_MS" ;;
-            loss) CMD="PING LOSS_PERCENT" ;;
-        esac ;;
-        s) CMD=STOP ;;
+        s) SOCKET=$OPTARG ;;
         -) break ;;
         ?) exit 2 ;;
     esac
 done
 shift $((OPTIND-1))
 
-exec socat - unix:"$SOCKET" <<< "$CMD"
+err() {
+    echo 1>&2 "$@"
+    exit 1
+}
+
+if [ "$1" = "ping" ]; then
+    if [ "$2" = "avg" ]; then
+        CMDLINE="PING AVG_MS"
+    elif [ "$2" = "loss" ]; then
+        CMDLINE="PING LOSS_PERCENT"
+    else
+        err "unknown ping subcommand: $2"
+    fi
+elif [ "$1" = "location" ]; then
+    CMDLINE="LOCATION"
+elif [ "$1" = "ip" ]; then
+    CMDLINE="IP"
+elif [ "$1" = "stop" ]; then
+    CMDLINE="STOP"
+elif [ "$1" = "fs" ]; then
+    if [ "$2" = "usage" ]; then
+        CMDLINE="FS USAGE_PERCENT $3"
+    elif [ "$2" = "free" ]; then
+        CMDLINE="FS FREE_PERCENT $3"
+    elif [ "$2" = "available" ]; then
+        CMDLINE="FS AVAILABLE_BYTES $3"
+    else
+        err "unknown fs subcommand: $2"
+    fi
+fi
+
+exec socat - unix:"$SOCKET" <<< "$CMDLINE"

@@ -6,10 +6,13 @@ CLIENT=${CLIENT-./client}
 
 for i in $(seq 1 5); do
     sleep 1
-    $CLIENT -p avg
-    $CLIENT -p loss
-    $CLIENT -i
-    $CLIENT -l
+    $CLIENT ping avg
+    $CLIENT ping loss
+    $CLIENT ip
+    $CLIENT location
+    $CLIENT fs usage /
+    $CLIENT fs free /
+    $CLIENT fs available /
 done
 
-$CLIENT -s
+$CLIENT stop
