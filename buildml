@@ -77,7 +77,7 @@ endef
 	\$(BUILDML_EXEC) atdgen -j \$<
 
 %.o: %.c
-	\$(BUILDML) -c -- \$(BUILDML_OCAMLC_OPTS) \$<
+	\$(BUILDML) -e -- ocamlfind ocamlc -c \$(BUILDML_OCAMLC_OPTS) \$<
 
 ifeq (\$(.DEFAULT_GOAL),)
 \$(error no default goal is set)
