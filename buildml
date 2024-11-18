@@ -1,0 +1,199 @@
+#!/bin/bash
+
+set -o nounset -o pipefail -o errexit
+
+THIS_SCRIPT=$(readlink -f "$0")
+
+BUILDML_TARGET=
+SUFFIX=
+ACTION=compile
+BUILDML_PROJECT_ROOT=${BUILDML_PROJECT_ROOT-}
+BUILDML_VERBOSE=${BUILDML_VERBOSE-}
+while getopts "t:C:R:sdcTDemMIv-" OPT; do
+    case $OPT in
+        t) BUILDML_TARGET=$OPTARG; SUFFIX=.$BUILDML_TARGET ;;
+        C) cd "$OPTARG" ;;
+        R) BUILDML_PROJECT_ROOT=$OPTARG ;;
+        s) ACTION=switch ;;
+        d) ACTION=deps ;;
+        c) ACTION=compile; break ;;
+        T) ACTION=mktop; break ;;
+        D) ACTION=doc; break ;;
+        e) ACTION=execute; break ;;
+        m) ACTION="make"; break ;;
+        M) ACTION=makefile ;;
+        I) ACTION=ignorefile ;;
+        v) BUILDML_VERBOSE=1 ;;
+        -) break ;;
+        ?) exit 2 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ "${1-}" = "--" ]; then
+    shift 1
+fi
+
+if [ "$ACTION" = "ignorefile" ]; then
+    cat <<EOF
+.opam
+.switch*
+.deps*
+EOF
+    exit 0
+fi
+
+if [ -z "$BUILDML_PROJECT_ROOT" ]; then
+    BUILDML_PROJECT_ROOT=$(pwd)
+fi
+
+if [ -z "$BUILDML_TARGET" ]; then
+    BUILDML_TARGET=$(basename "$BUILDML_PROJECT_ROOT")
+fi
+
+if [ "$ACTION" = "make" ] || [ "$ACTION" = "makefile" ]; then
+    TMP=$(mktemp -d "/tmp/buildml-XXXXX")
+    trap 'rm -rf $TMP' EXIT
+
+    cat <<EOF >"$TMP/buildml.mk"
+BUILDML = $THIS_SCRIPT
+BUILDML_OCAMLC = \$(BUILDML) -c -- \$(BUILDML_OCAMLC_OPTS)
+BUILDML_OCAMLC_OPTS ?= -output-complete-exe
+BUILDML_OCAMLMKTOP = \$(BUILDML) -T -- \$(BUILDML_OCAMLMKTOP_OPTS)
+BUILDML_OCAMLMKTOP_OPTS ?= -output-complete-exe
+BUILDML_OCAMLDOC = \$(BUILDML) -D --
+BUILDML_EXEC = \$(BUILDML) -e --
+export BUILDML_TARGET = $BUILDML_TARGET
+export BUILDML_PROJECT_ROOT = $(readlink -f "$BUILDML_PROJECT_ROOT")
+
+define atd
+\$(1)_t.mli \$(1)_t.ml \$(1)_j.mli \$(1)_j.ml
+endef
+
+%_t.mli %_t.ml: %.atd
+	\$(BUILDML_EXEC) atdgen -t \$<
+
+%_j.mli %_j.ml: %.atd
+	\$(BUILDML_EXEC) atdgen -j \$<
+
+ifeq (\$(.DEFAULT_GOAL),)
+\$(error no default goal is set)
+endif
+
+.PHONY: clean
+clean:
+	rm -rf *.exe *.cmi *.cmo *.cma *_{j,t}.{ml,mli}
+EOF
+
+    if [ "$ACTION" = "makefile" ]; then
+        cat "$TMP/buildml.mk"
+        exit 0
+    fi
+
+    ${MAKE-make} -I"$TMP" "$@"
+    exit 0
+elif [ "$ACTION" != "switch" ] && [ "$ACTION" != "deps" ] && [ "$ACTION" != "compile" ] && [ "$ACTION" != "mktop" ] && [ "$ACTION" != "doc" ] && [ "$ACTION" != "execute" ]; then
+    echo 1>&2 "unsupported action: $ACTION"
+    exit 1
+fi
+
+export OPAMROOT="$BUILDML_PROJECT_ROOT/.opam"
+
+if [ ! -d "$OPAMROOT" ]; then
+    echo 1>&2 "initializing OPAM: $OPAMROOT"
+    ARGS=("--bare" "--no-setup")
+    if [ -n "${OPAMNOSANDBOXING-}" ]; then
+        ARGS+=("--disable-sandboxing")
+    fi
+    opam init "${ARGS[@]}"
+fi
+
+SWITCH_SPEC="$BUILDML_PROJECT_ROOT/switch.$BUILDML_TARGET"
+if [ ! -f "$SWITCH_SPEC" ]; then
+    SWITCH_SPEC="$BUILDML_PROJECT_ROOT/switch"
+fi
+if ! [ "$BUILDML_PROJECT_ROOT/.switch$SUFFIX" -nt "$SWITCH_SPEC" ]; then
+    mapfile -t SPEC < "$SWITCH_SPEC"
+    export OPAMSWITCH=${SPEC[0]}
+    if ! opam env --set-switch &>/dev/null; then
+        echo 1>&2 "creating switch: ${SPEC[*]}"
+        opam switch create --no-switch "${SPEC[@]}"
+    fi
+    echo "$OPAMSWITCH" > "$BUILDML_PROJECT_ROOT/.switch$SUFFIX"
+else
+    OPAMSWITCH=$(<"$BUILDML_PROJECT_ROOT/.switch$SUFFIX")
+    export OPAMSWITCH
+fi
+
+eval "$(opam env --set-switch)"
+
+if [ "$ACTION" = "switch" ]; then
+    opam switch show
+    exit 0
+fi
+
+DEPS_SPEC="$BUILDML_PROJECT_ROOT/deps.$BUILDML_TARGET"
+if [ ! -f "$DEPS_SPEC" ]; then
+    DEPS_SPEC="$BUILDML_PROJECT_ROOT/deps"
+fi
+
+deps_spec() {
+    sed 's/\(.*\)\s*#.*/\1/' "$DEPS_SPEC" \
+        | sed '/^\s*$/d'
+}
+
+deps_for_opam() {
+    deps_spec | sed 's,/.*,,'
+}
+
+deps_for_ocamlfind() {
+    deps_spec \
+        | sed 's,^\([a-zA-Z0-9_-]\+\)[^/]*$,\1,' \
+        | sed 's,^\([a-zA-Z0-9_-]\+\)[^/]*/\([a-zA-Z0-9_-]\+\)$,\1.\2,'
+}
+
+OCAMLFIND_PKG=${OCAMLFIND_PKG-ocamlfind>=1.9.6}
+
+DEPS_FLAG=$BUILDML_PROJECT_ROOT/.deps$SUFFIX
+if ! [ "$DEPS_FLAG" -nt "$DEPS_SPEC" ]; then
+    mapfile -t OPAM_PKGs < <(deps_for_opam)
+    echo 1>&2 "installing dependencies:"
+    for p in "$OCAMLFIND_PKG" "${OPAM_PKGs[@]}"; do
+        echo 1>&2 "  $p"
+    done
+    opam install --yes "$OCAMLFIND_PKG" "${OPAM_PKGs[@]}"
+    touch "$DEPS_FLAG"
+fi
+
+if [ "$ACTION" = "execute" ]; then
+    exec "$@"
+elif [ "$ACTION" = "deps" ]; then
+    exit 0
+fi
+
+ARGS=()
+
+OCAMLFIND_ARGS=()
+
+while read -r p; do
+    ARGS+=("-package" "$p")
+done < <(deps_for_ocamlfind)
+
+if [ "$ACTION" = "compile" ]; then
+    OCAMLFIND_ARGS+=("-linkpkg")
+    CMD=ocamlc
+elif [ "$ACTION" = "mktop" ]; then
+    OCAMLFIND_ARGS+=("-linkpkg")
+    CMD=ocamlmktop
+elif [ "$ACTION" = "doc" ]; then
+    CMD=ocamldoc
+else
+    echo 1>&2 "don't know how to do $ACTION using ocmalfind"
+    exit 1
+fi
+
+if [ -n "$BUILDML_VERBOSE" ]; then
+    ocamlfind "$CMD" "${OCAMLFIND_ARGS[@]}" -only-show "${ARGS[@]}" "$@" 1>&2
+fi
+
+exec ocamlfind "$CMD" "${OCAMLFIND_ARGS[@]}" "${ARGS[@]}" "$@"
