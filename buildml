@@ -13,7 +13,7 @@ while getopts "t:C:R:sdcTDemMIv-" OPT; do
     case $OPT in
         t) BUILDML_TARGET=$OPTARG; SUFFIX=.$BUILDML_TARGET ;;
         C) cd "$OPTARG" ;;
-        R) BUILDML_PROJECT_ROOT=$OPTARG ;;
+        R) BUILDML_PROJECT_ROOT=$(readlink -f "$OPTARG") ;;
         s) ACTION=switch ;;
         d) ACTION=deps ;;
         c) ACTION=compile; break ;;
