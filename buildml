@@ -57,10 +57,10 @@ if [ "$ACTION" = "make" ] || [ "$ACTION" = "makefile" ]; then
 
     cat <<EOF >"$TMP/buildml.mk"
 BUILDML = $THIS_SCRIPT
-BUILDML_OCAMLC = \$(BUILDML) -c -- \$(BUILDML_OCAMLC_OPTS)
-BUILDML_OCAMLC_OPTS ?= -output-complete-exe
-BUILDML_OCAMLMKTOP = \$(BUILDML) -T -- \$(BUILDML_OCAMLMKTOP_OPTS)
-BUILDML_OCAMLMKTOP_OPTS ?= -output-complete-exe
+BUILDML_OCAMLC = \$(BUILDML) -c -- -output-complete-exe \$(BUILDML_OCAMLC_OPTS)
+BUILDML_OCAMLC_OPTS ?=
+BUILDML_OCAMLMKTOP = \$(BUILDML) -T --  -output-complete-exe \$(BUILDML_OCAMLMKTOP_OPTS)
+BUILDML_OCAMLMKTOP_OPTS ?=
 BUILDML_OCAMLDOC = \$(BUILDML) -D --
 BUILDML_EXEC = \$(BUILDML) -e --
 export BUILDML_TARGET = $BUILDML_TARGET
@@ -76,13 +76,16 @@ endef
 %_j.mli %_j.ml: %.atd
 	\$(BUILDML_EXEC) atdgen -j \$<
 
+%.o: %.c
+	\$(BUILDML) -c -- \$(BUILDML_OCAMLC_OPTS) \$<
+
 ifeq (\$(.DEFAULT_GOAL),)
 \$(error no default goal is set)
 endif
 
 .PHONY: clean
 clean:
-	rm -rf *.exe *.cmi *.cmo *.cma *_{j,t}.{ml,mli}
+	rm -rf *.exe *.cmi *.cmo *.cma *_{j,t}.{ml,mli} *.o
 EOF
 
     if [ "$ACTION" = "makefile" ]; then
