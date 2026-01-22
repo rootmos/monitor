@@ -12,7 +12,7 @@ let start () =
   let fs = FsMap.empty in
   let fs = FsMap.add "/" None fs in
   let fs = FsMap.add "/tmp" None fs in
-  let fs = FsMap.add "/stash" None fs in
+  let fs = FsMap.add "/home" None fs in
   return { fs }
 
 let refresh st =

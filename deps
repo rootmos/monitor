@@ -1,0 +1,6 @@
+lwt.5.9.0
+lwt_ppx.5.8.0
+lwt_ssl.1.2.0
+cohttp-lwt-unix.5.3.0
+atdgen.2.15.0
+logs.0.7.0
